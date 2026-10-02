@@ -1,0 +1,58 @@
+#!/bin/bash
+
+# Shadows Omarchy's omarchy-launch-screensaver: while the LCARS theme is active,
+# play the warp video with mpv instead of the terminal screensaver. Any other
+# theme (or a missing video/mpv) falls through to the stock launcher.
+
+STOCK="${OMARCHY_PATH:-/usr/share/omarchy}/bin/omarchy-launch-screensaver"
+DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+VIDEO="$DIR/enterprise-warp.mp4"
+THEME=$(cat "$HOME/.local/state/omarchy/current/theme.name" 2>/dev/null)
+
+if [[ $THEME != "lcars" || ! -f $VIDEO ]] || ! command -v mpv >/dev/null; then
+  exec "$STOCK" "$@"
+fi
+
+# Exit early if screensaver is already running
+pgrep -f '[o]rg.omarchy.screensaver' && exit 0
+
+# Allow screensaver to be turned off but also force started
+if omarchy-toggle-enabled screensaver-off && [[ $1 != "force" ]]; then
+  exit 1
+fi
+
+focused=$(omarchy-hyprland-monitor-focused)
+
+hypr_focus_monitor() {
+  hyprctl dispatch "hl.dsp.focus({ monitor = \"$1\" })" >/dev/null 2>&1 || hyprctl dispatch focusmonitor "$1" >/dev/null
+}
+
+hypr_exec() {
+  local command
+  printf -v command '%q ' "$@"
+
+  hyprctl dispatch "hl.dsp.exec_cmd([[$command]])" >/dev/null 2>&1 || hyprctl dispatch exec -- bash -lc "$command" >/dev/null
+}
+
+SOCKET="$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock"
+exec {events}< <(socat -U - "UNIX-CONNECT:$SOCKET")
+
+wait_for_screensaver_window() {
+  local line deadline=$((SECONDS + 5))
+  while ((SECONDS < deadline)) && IFS= read -r -t $((deadline - SECONDS)) -u "$events" line; do
+    [[ $line == openwindow\>\>*,org.omarchy.screensaver,* ]] && return 0
+  done
+}
+
+for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
+  hypr_focus_monitor "$m"
+
+  hypr_exec mpv --no-config --wayland-app-id=org.omarchy.screensaver --title="LCARS Screensaver" \
+    --fullscreen --loop-file=inf --no-audio --no-osc --no-osd-bar --osd-level=0 \
+    --no-input-default-bindings --cursor-autohide=always --panscan=1.0 --background-color='#000000' \
+    --hwdec=auto-safe --stop-screensaver=no --script="$DIR/exit-on-input.lua" "$VIDEO"
+
+  wait_for_screensaver_window
+done
+
+hypr_focus_monitor "$focused"

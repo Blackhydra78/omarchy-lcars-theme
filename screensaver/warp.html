@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Maximum warp</title>
+<style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;cursor:none}canvas{display:block;width:100%;height:100%}#error{position:fixed;inset:20px;color:#ffb5a6;white-space:pre-wrap;font:16px monospace;cursor:auto}</style>
+<canvas id="c"></canvas><div id="error" hidden></div>
+<script>
+'use strict';
+// All assets are generated here. Time is reduced to one 12-second phase,
+// including negative timestamps; no accumulated simulation state is used.
+const canvas=document.getElementById('c'), params=new URLSearchParams(location.search);
+const gl=canvas.getContext('webgl2',{antialias:true,alpha:false,preserveDrawingBuffer:true});
+function fail(e){console.error(e);const d=document.getElementById('error');d.hidden=false;d.textContent=String(e);document.title='error';}
+try {
+if(!gl)throw Error('WebGL2 is unavailable');
+const TAU=Math.PI*2;
+function program(v,f){function shader(type,s){const q=gl.createShader(type);gl.shaderSource(q,s);gl.compileShader(q);if(!gl.getShaderParameter(q,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(q));return q}const p=gl.createProgram();gl.attachShader(p,shader(gl.VERTEX_SHADER,v));gl.attachShader(p,shader(gl.FRAGMENT_SHADER,f));gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(p));return p}
+const meshVS=`#version 300 es
+precision highp float;
+layout(location=0) in vec3 position;layout(location=1) in vec3 normal;layout(location=2) in float material;
+uniform mat4 vp;uniform float phase;
+out vec3 p;out vec3 n;flat out int mat;
+void main(){p=position;n=normal;mat=int(material+.1);vec3 q=p;q.y+=.025*sin(phase);q.x+=.025*cos(phase);gl_Position=vp*vec4(q,1);gl_Position.y-=.12*gl_Position.w;}`;
+const meshFS=`#version 300 es
+precision highp float;
+in vec3 p;in vec3 n;flat in int mat;out vec4 color;
+uniform vec3 eye;uniform float phase;
+float hash(vec2 a){return fract(sin(dot(a,vec2(127.1,311.7)))*43758.5453);}
+float band(float v,float center,float width){return 1.-smoothstep(width,width+fwidth(v)*1.3,abs(v-center));}
+void main(){vec3 N=normalize(n),V=normalize(eye-p);vec3 base=vec3(.47,.57,.66);vec3 emission=vec3(0);float rough=.42;
+float r=length(vec2(p.x/3.12,(p.z+2.1)/2.32));float a=atan((p.z+2.1)/2.32,p.x/3.12);
+vec2 grid=vec2(a*55.,r*65.);vec2 cell=floor(grid);float az=hash(cell);base*=.91+.15*az;
+float seam=min(fract(grid.x),fract(grid.y));base*=1.-.065*(1.-smoothstep(0.,.035,seam));
+if(mat==1){
+float ring=band(r,.866,.013);base=mix(base,vec3(.14,.18,.22),ring);
+float pods=band(r,.775,.012)*band(fract(a*20./6.2831853),.5,.075);base=mix(base,vec3(.69,.65,.53),pods);
+float inner=band(r,.39,.003)+band(r,.63,.002);base*=1.-.16*inner;
+if(abs(N.y)<.58){float row=band(p.y,.54,.015)+band(p.y,.64,.013);float win=band(fract(a*95./6.2831853),.5,.13);emission+=vec3(.65,.77,.84)*row*win*.7;base*=.75;}
+}
+if(mat==0){vec2 h=vec2(p.z*13.,p.y*19.);float windows=band(fract(h.x),.5,.11)*band(fract(h.y),.5,.08);windows*=step(.32,hash(floor(h)));emission+=windows*vec3(.65,.76,.8)*.55*step(.3,abs(N.x));}
+if(mat==2){base=vec3(.36,.44,.52);float panel=band(fract(p.z*8.),.5,.017);base*=1.-panel*.23;}
+if(mat==3){base=vec3(.015,.08,.16);float ribs=.65+.35*pow(.5+.5*cos(p.z*90.),4.);emission=vec3(.025,.38,1.)*ribs*(.88+.08*sin(phase*2.));}
+if(mat==4){base=vec3(.25,.015,.008);emission=vec3(1.,.045,.012)*(1.+.12*cos(p.x*38.));}
+if(mat==5){base=vec3(.12,.16,.19);}
+if(mat==6){base=vec3(.20,.11,.04);emission=vec3(.12,.40,.85)*(.5+.5*pow(.5+.5*cos(p.x*60.),3.));}
+vec3 L=normalize(vec3(-5.,9.,-8.));float diffuse=max(dot(N,L),0.);float spec=pow(max(dot(N,normalize(L+V)),0.),48.);
+vec3 lit=base*(.18+.95*diffuse)+vec3(.45,.55,.68)*spec*.36;
+// Local engine spill across the upper engineering hull and swept pylons.
+float glow=exp(-abs(abs(p.x)-1.95)*3.-abs(p.y-.2)*2.-max(abs(p.z-1.3)-1.6,0.)*2.);
+lit+=base*vec3(.025,.22,.6)*glow*(.88+.08*sin(phase*2.));
+color=vec4(lit+emission,1.);}`;
+const shipProgram=program(meshVS,meshFS);
+let vertices=[];
+function tri(a,b,c,m){let u=b.map((v,i)=>v-a[i]),v=c.map((v,i)=>v-a[i]);let n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];let l=Math.hypot(...n)||1;n=n.map(x=>x/l);for(const p of [a,b,c])vertices.push(...p,...n,m)}
+function surface(nu,nv,fn,m){for(let j=0;j<nv;j++)for(let i=0;i<nu;i++){let a=fn(i/nu,j/nv),b=fn((i+1)/nu,j/nv),c=fn((i+1)/nu,(j+1)/nv),d=fn(i/nu,(j+1)/nv);tri(a,b,c,m);tri(a,c,d,m)}}
+function ellipsoid(center,r,m,nu=64,nv=24){surface(nu,nv,(u,v)=>{let a=u*TAU,b=v*Math.PI;return [center[0]+r[0]*Math.cos(a)*Math.sin(b),center[1]+r[1]*Math.cos(b),center[2]+r[2]*Math.sin(a)*Math.sin(b)]},m)}
+// Galaxy saucer: shallow convex decks, a substantial rim, and elliptical planform.
+const profile=[[0,.91],[.13,.91],[.21,.80],[.40,.76],[.65,.70],[.84,.64],[.96,.60],[1,.55],[1,.46],[.96,.41],[.82,.29],[.60,.22],[.35,.20],[0,.23]];
+for(let j=0;j<profile.length-1;j++)surface(160,1,(u,v)=>{let t=profile[j][0]*(1-v)+profile[j+1][0]*v,y=profile[j][1]*(1-v)+profile[j+1][1]*v;return [3.12*t*Math.cos(u*TAU),y,-2.1+2.32*t*Math.sin(u*TAU)]},1);
+ellipsoid([0,.94,-2.24],[.37,.13,.47],0);ellipsoid([0,1.065,-2.27],[.19,.08,.22],5);
+// Secondary hull and its long aft taper.
+surface(80,48,(u,v)=>{let z=-2.1+5.05*v;let w=.70*Math.pow(Math.sin(Math.PI*v),.65)*(1-.42*v);let a=TAU*u;return [w*Math.cos(a),-.53+w*.75*Math.sin(a),z]},0);
+// Dorsal connecting neck: curved broad shoulder tapering into the engineering hull.
+surface(64,28,(u,v)=>{let z=-1.75+2.65*v,w=.43*(1-.58*v);let a=TAU*u;return [w*Math.cos(a),-.02+.57*Math.sin(a)*(1-.45*v),z]},0);
+function beam(a,b,width,thickness,m){let dx=b[0]-a[0],dz=b[2]-a[2],l=Math.hypot(dx,dz);let side=[-dz/l*width/2,0,dx/l*width/2];let points=[];for(const p of [a,b])for(const sy of [-1,1])for(const sx of [-1,1])points.push([p[0]+side[0]*sx,p[1]+sy*thickness/2,p[2]+side[2]*sx]);for(const q of [[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]]){tri(points[q[0]],points[q[1]],points[q[2]],m);tri(points[q[0]],points[q[2]],points[q[3]],m)}}
+for(const s of [-1,1]){
+beam([s*.30,-.28,.45],[s*1.95,.20,1.78],.36,.14,0);
+// Long flattened warp nacelles, rounded forward shoulders and tapered stern caps.
+surface(64,56,(u,v)=>{let z=-.66+4.42*v;let cap=Math.min(1,Math.sqrt(Math.max(0,1-Math.pow((v-.5)*2,8))));let w=.255*cap*(1-.26*v),h=.19*cap;let a=u*TAU;return [s*1.95+w*Math.cos(a),.34+h*Math.sin(a),z]},2);
+// Blue field grilles on both sides, tucked inside raised metallic rails.
+for(const side of [-1,1])surface(2,80,(u,v)=>[s*1.95+side*(.237-.055*v),.31+u*.14,-.27+3.48*v],3);
+surface(12,80,(u,v)=>[s*1.95+(u-.5)*.23,.527-.017*v,-.20+3.35*v],3);
+beam([s*1.95-.14,.535,-.21],[s*1.95-.12,.519,3.20],.035,.026,2);
+beam([s*1.95+.14,.535,-.21],[s*1.95+.12,.519,3.20],.035,.026,2);
+ellipsoid([s*1.95,.35,-.57],[.225,.16,.25],4,48,18);
+ellipsoid([s*1.95,.355,3.58],[.16,.10,.25],5);
+// Aft saucer impulse blocks, with inboard dark housings.
+beam([s*.74,.58,-.02],[s*1.11,.58,-.02],.22,.13,5);
+beam([s*.76,.585,.103],[s*1.09,.585,.103],.02,.071,4);
+}
+ellipsoid([0,-.53,-2.08],[.34,.22,.045],6);
+beam([-.16,.36,.77],[.16,.36,.77],.12,.07,4);
+const shipVAO=gl.createVertexArray();gl.bindVertexArray(shipVAO);const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(vertices),gl.STATIC_DRAW);for(let i=0;i<3;i++){gl.enableVertexAttribArray(i);gl.vertexAttribPointer(i,i===2?1:3,gl.FLOAT,false,28,i===0?0:i===1?12:24)}const shipCount=vertices.length/7;vertices=null;
+const starProgram=program(`#version 300 es
+precision highp float;
+uniform vec2 resolution;uniform float phase;
+out vec2 uv;out float brightness;out float hue;
+float hash(float n){return fract(sin(n*127.1)*43758.5453);}
+void main(){float id=float(gl_InstanceID);float a=hash(id+1.)*6.2831853;float cycles=7.+floor(hash(id+4.)*7.);float t=fract(hash(id+8.)+phase/6.2831853*cycles);float z=pow(t,3.);vec2 dir=vec2(cos(a),sin(a));dir.x*=resolution.y/resolution.x;vec2 origin=vec2(.03,.29);float radius=.025+z*(2.6+hash(id+13.)*2.);float len=(.015+z*.55)*(.3+hash(id+19.));vec2 head=origin+dir*radius,tail=origin+dir*max(.008,radius-len);vec2 perp=vec2(-dir.y,dir.x);perp=normalize(perp);float width=(.65+hash(id+31.)*.65)/resolution.y;int k=gl_VertexID;vec2 corners[6]=vec2[6](vec2(0,-1),vec2(1,-1),vec2(1,1),vec2(0,-1),vec2(1,1),vec2(0,1));uv=corners[k];vec2 p=mix(tail,head,uv.x)+perp*uv.y*width*3.;brightness=(.2+hash(id+42.)*.8)*smoothstep(0.,.09,t)*(1.-smoothstep(.92,1.,t));hue=hash(id+55.);gl_Position=vec4(p,.999,1);}`,`#version 300 es
+precision highp float;
+in vec2 uv;in float brightness;in float hue;out vec4 color;
+void main(){float core=exp(-uv.y*uv.y*14.);vec3 c=vec3(.72,.84,1.)*core;c+=vec3(.18,.01,.005)*exp(-pow((uv.y-.47)*5.,2.))+vec3(.005,.06,.24)*exp(-pow((uv.y+.47)*5.,2.));float endFade=pow(max(0.,sin(uv.x*3.14159265)),.25);color=vec4(c*brightness*endFade,1.);}`);
+const fullscreen=`#version 300 es
+precision highp float;
+out vec2 uv;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.-1.,0,1);}`;
+const blurProgram=program(fullscreen,`#version 300 es
+precision highp float;
+in vec2 uv;out vec4 color;uniform sampler2D tex;uniform vec2 delta;uniform int extract;
+void main(){vec3 sum=vec3(0);for(int i=-8;i<=8;i++){vec3 c=texture(tex,uv+float(i)*delta).rgb;if(extract==1)c=max(c-vec3(.52),vec3(0));float w=exp(-float(i*i)/20.);sum+=c*w;}color=vec4(sum/7.887,1);}`);
+const composite=program(fullscreen,`#version 300 es
+precision highp float;
+in vec2 uv;out vec4 color;uniform sampler2D scene;uniform sampler2D bloom;
+void main(){vec3 c=texture(scene,uv).rgb+texture(bloom,uv).rgb*1.45;color=vec4(pow(c,vec3(.9)),1.);}`);
+const emptyVAO=gl.createVertexArray();let targets=[],width=0,height=0;
+function target(w,h,depth){const texture=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,texture);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,texture,0);let d=null;if(depth){d=gl.createRenderbuffer();gl.bindRenderbuffer(gl.RENDERBUFFER,d);gl.renderbufferStorage(gl.RENDERBUFFER,gl.DEPTH_COMPONENT24,w,h);gl.framebufferRenderbuffer(gl.FRAMEBUFFER,gl.DEPTH_ATTACHMENT,gl.RENDERBUFFER,d)}if(gl.checkFramebufferStatus(gl.FRAMEBUFFER)!==gl.FRAMEBUFFER_COMPLETE)throw Error('Incomplete framebuffer');return {f,texture,d,w,h}}
+function resize(){const w=params.has('w')?Number(params.get('w')):Math.round(innerWidth*devicePixelRatio),h=params.has('h')?Number(params.get('h')):Math.round(innerHeight*devicePixelRatio);if(!(w>0&&h>0&&Number.isInteger(w)&&Number.isInteger(h)))throw Error('Canvas dimensions must be positive integers');if(w===width&&h===height)return;width=w;height=h;canvas.width=w;canvas.height=h;for(const t of targets){gl.deleteFramebuffer(t.f);gl.deleteTexture(t.texture);if(t.d)gl.deleteRenderbuffer(t.d)}targets=[target(w,h,true),target(Math.ceil(w/4),Math.ceil(h/4),false),target(Math.ceil(w/4),Math.ceil(h/4),false)]}
+function normalize(v){let l=Math.hypot(...v);return v.map(x=>x/l)}function cross(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]}function dot(a,b){return a.reduce((s,v,i)=>s+v*b[i],0)}
+const eye=[6.2,8.2,15.5],look=[0,.0,-.9];
+function matrix(){let z=normalize(eye.map((v,i)=>v-look[i])),x=normalize(cross([0,1,0],z)),y=cross(z,x);let view=[x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-dot(x,eye),-dot(y,eye),-dot(z,eye),1];let f=1/Math.tan(.47/2),aspect=width/height;let projection=[f/aspect,0,0,0,0,f,0,0,0,0,-1.002,-1,0,0,-.2002,0];let out=new Float32Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++)for(let k=0;k<4;k++)out[c*4+r]+=projection[k*4+r]*view[c*4+k];return out}
+function uniform(p,n){return gl.getUniformLocation(p,n)}function bindTexture(unit,t){gl.activeTexture(gl.TEXTURE0+unit);gl.bindTexture(gl.TEXTURE_2D,t)}function bindTarget(t){gl.bindFramebuffer(gl.FRAMEBUFFER,t?t.f:null);gl.viewport(0,0,t?t.w:width,t?t.h:height)}
+window.renderFrame=function(t){try{if(!Number.isFinite(t))throw Error('Time must be finite');resize();let phase=((t%12)+12)%12/12*TAU;bindTarget(targets[0]);gl.clearColor(0,0,0,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.disable(gl.DEPTH_TEST);gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE);gl.bindVertexArray(emptyVAO);gl.useProgram(starProgram);gl.uniform2f(uniform(starProgram,'resolution'),width,height);gl.uniform1f(uniform(starProgram,'phase'),phase);gl.drawArraysInstanced(gl.TRIANGLES,0,6,1000);gl.disable(gl.BLEND);gl.enable(gl.DEPTH_TEST);gl.useProgram(shipProgram);gl.uniformMatrix4fv(uniform(shipProgram,'vp'),false,matrix());gl.uniform3fv(uniform(shipProgram,'eye'),eye);gl.uniform1f(uniform(shipProgram,'phase'),phase);gl.bindVertexArray(shipVAO);gl.drawArrays(gl.TRIANGLES,0,shipCount);gl.disable(gl.DEPTH_TEST);gl.bindVertexArray(emptyVAO);gl.useProgram(blurProgram);gl.uniform1i(uniform(blurProgram,'tex'),0);bindTarget(targets[1]);bindTexture(0,targets[0].texture);gl.uniform2f(uniform(blurProgram,'delta'),1/targets[1].w,0);gl.uniform1i(uniform(blurProgram,'extract'),1);gl.drawArrays(gl.TRIANGLES,0,3);bindTarget(targets[2]);bindTexture(0,targets[1].texture);gl.uniform2f(uniform(blurProgram,'delta'),0,1/targets[2].h);gl.uniform1i(uniform(blurProgram,'extract'),0);gl.drawArrays(gl.TRIANGLES,0,3);bindTarget(null);gl.useProgram(composite);bindTexture(0,targets[0].texture);bindTexture(1,targets[2].texture);gl.uniform1i(uniform(composite,'scene'),0);gl.uniform1i(uniform(composite,'bloom'),1);gl.drawArrays(gl.TRIANGLES,0,3);gl.finish();}catch(e){fail(e);throw e}};
+if(params.has('t')){window.renderFrame(Number(params.get('t')));document.title='ready';}else {const epoch=performance.now();function animate(now){window.renderFrame((now-epoch)/1000);requestAnimationFrame(animate)}requestAnimationFrame(animate)}
+}catch(e){fail(e)}
+</script></html>

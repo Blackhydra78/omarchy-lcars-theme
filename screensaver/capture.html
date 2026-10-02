@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>capture</title>
+<style>html,body{margin:0;background:#000;overflow:hidden}iframe{border:0;display:block}</style>
+<iframe id="f"></iframe>
+<script>
+// Driven by render.py: steps warp.html one frame at a time and POSTs each frame.
+const q = new URLSearchParams(location.search);
+const w = +q.get("w"), h = +q.get("h"), fps = +q.get("fps"), frames = +q.get("frames");
+const f = document.getElementById("f");
+f.width = w; f.height = h;
+f.src = `warp.html?w=${w}&h=${h}&t=0`;
+
+const post = (path, body) => fetch(path, { method: "POST", body });
+
+f.onload = async () => {
+  try {
+    const win = f.contentWindow;
+    for (let i = 0; i < 200 && typeof win.renderFrame !== "function"; i++) await new Promise(r => setTimeout(r, 50));
+    if (typeof win.renderFrame !== "function") throw new Error("renderFrame not found");
+    const canvas = win.document.querySelector("canvas");
+    for (let i = 0; i < frames; i++) {
+      win.renderFrame(i / fps);
+      const blob = await new Promise(r => canvas.toBlob(r, "image/png"));
+      if (!blob) throw new Error("toBlob failed at frame " + i);
+      await post("/frame/" + i, blob);
+    }
+    await post("/done", "");
+  } catch (e) {
+    await post("/error", String(e && e.stack || e));
+  }
+};
+</script>

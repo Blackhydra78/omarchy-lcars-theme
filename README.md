@@ -23,6 +23,22 @@ Or pick it later with `omarchy theme set lcars`.
 | `icons.theme`, `keyboard.rgb`, `chromium.theme` | Icon set, keyboard backlight and browser color |
 | `scripts/gen-backgrounds.py` | Regenerates the wallpapers (needs `rsvg-convert`) |
 
+## Screensaver
+
+`screensaver/` holds a looping video of a Galaxy-class starship at maximum warp,
+shown instead of Omarchy's terminal screensaver while this theme is active
+(other themes keep the stock one). It closes on any key, click or pointer
+movement. Work in progress: the ship model is still being refined.
+
+```bash
+~/.config/omarchy/themes/lcars/screensaver/install.sh            # then log out and back in
+~/.config/omarchy/themes/lcars/screensaver/install.sh uninstall
+```
+
+The video is rendered from `screensaver/warp.html` (procedural WebGL, no
+assets) with `screensaver/render.py`, which needs Chromium and ffmpeg. Playback
+needs `mpv`.
+
 ## Palette
 
 | Role | Color |
