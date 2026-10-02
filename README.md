@@ -28,7 +28,7 @@ Or pick it later with `omarchy theme set lcars`.
 `screensaver/` holds a looping video of a Galaxy-class starship at maximum warp,
 shown instead of Omarchy's terminal screensaver while this theme is active
 (other themes keep the stock one). It closes on any key, click or pointer
-movement. Work in progress: the ship model is still being refined.
+movement.
 
 ```bash
 ~/.config/omarchy/themes/lcars/screensaver/install.sh            # then log out and back in
